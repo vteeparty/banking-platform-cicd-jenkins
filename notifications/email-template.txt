@@ -1,0 +1,49 @@
+Subject: [{{STATUS}}] Banking Platform Build #{{BUILD_NUMBER}} — {{BRANCH}}
+
+Build Report — Banking Platform CI/CD
+======================================
+
+Status      : {{STATUS}}
+Application : {{APP_NAME}}
+Build #     : {{BUILD_NUMBER}}
+Branch      : {{BRANCH}}
+Commit      : {{COMMIT}}
+Triggered by: {{TRIGGERED_BY}}
+Duration    : {{DURATION}}
+Timestamp   : {{TIMESTAMP}}
+
+Build URL   : {{BUILD_URL}}
+
+--------------------------------------
+Stage Summary
+--------------------------------------
+{{STAGE_SUMMARY}}
+
+--------------------------------------
+{{#IS_FAILURE}}
+Action Required
+--------------------------------------
+The build has FAILED. Please review the console output at the link above
+and address the failure before merging or promoting this branch.
+
+Common causes:
+  • Unit test failure  → check test reports in Jenkins
+  • SonarQube gate     → review quality issues in SonarQube dashboard
+  • Dependency check   → a HIGH/CRITICAL CVE was detected
+  • Docker build error → inspect Dockerfile and build context
+
+{{/IS_FAILURE}}
+{{#IS_SUCCESS}}
+Next Steps
+--------------------------------------
+The build passed all quality gates. The Docker image has been published:
+
+  Image : {{DOCKER_IMAGE}}:{{IMAGE_TAG}}
+
+To deploy to a local environment, run:
+  docker pull {{DOCKER_IMAGE}}:{{IMAGE_TAG}}
+
+{{/IS_SUCCESS}}
+--------------------------------------
+This is an automated message from the Banking Platform Jenkins CI/CD system.
+Do not reply to this e-mail.

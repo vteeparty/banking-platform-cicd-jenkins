@@ -1,0 +1,50 @@
+{
+  "username": "Jenkins CI",
+  "icon_emoji": ":bank:",
+  "attachments": [
+    {
+      "fallback": "{{STATUS}}: Banking Platform Build #{{BUILD_NUMBER}} — {{BRANCH}}",
+      "color": "{{COLOR}}",
+      "pretext": "Banking Platform — CI/CD Notification",
+      "author_name": "Jenkins",
+      "author_icon": "https://www.jenkins.io/images/logos/jenkins/jenkins.png",
+      "title": "Build #{{BUILD_NUMBER}} — {{STATUS}}",
+      "title_link": "{{BUILD_URL}}",
+      "fields": [
+        {
+          "title": "Application",
+          "value": "{{APP_NAME}}",
+          "short": true
+        },
+        {
+          "title": "Status",
+          "value": "{{STATUS}}",
+          "short": true
+        },
+        {
+          "title": "Branch",
+          "value": "{{BRANCH}}",
+          "short": true
+        },
+        {
+          "title": "Commit",
+          "value": "{{COMMIT}}",
+          "short": true
+        },
+        {
+          "title": "Duration",
+          "value": "{{DURATION}}",
+          "short": true
+        },
+        {
+          "title": "Triggered By",
+          "value": "{{TRIGGERED_BY}}",
+          "short": true
+        }
+      ],
+      "footer": "Banking Platform Jenkins",
+      "footer_icon": "https://www.jenkins.io/images/logos/jenkins/jenkins.png",
+      "ts": "{{TIMESTAMP_EPOCH}}"
+    }
+  ]
+}
