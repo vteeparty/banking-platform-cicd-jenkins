@@ -1,6 +1,6 @@
 // ============================================================
 // Banking Platform — Build-Only Pipeline
-// Runs compile + unit tests only (no Docker push, no SonarQube)
+// Runs compile + unit tests + package (no Docker, no SonarQube)
 // Intended for feature branch validation and PR checks
 // ============================================================
 
@@ -8,10 +8,13 @@ pipeline {
 
     agent any
 
+    // ── Environment ──────────────────────────────────────────
     environment {
-        APP_NAME = 'banking-platform'
+        APP_NAME   = 'banking-platform'
+        MAVEN_OPTS = '-Xmx512m'
     }
 
+    // ── Pipeline Options ──────────────────────────────────────
     options {
         buildDiscarder(logRotator(numToKeepStr: '5'))
         timestamps()
@@ -19,85 +22,80 @@ pipeline {
         disableConcurrentBuilds()
     }
 
+    // ── Parameters ────────────────────────────────────────────
     parameters {
         booleanParam(name: 'SKIP_TESTS', defaultValue: false, description: 'Skip unit tests')
     }
 
+    // ── Stages ────────────────────────────────────────────────
     stages {
 
-        stage('Checkout') {
+        // ── Stage 1: Clone Repository ────────────────────────
+        stage('Clone Repository') {
             steps {
-                echo "Checking out branch: ${GIT_BRANCH}"
+                echo "Cloning repository for branch: ${env.GIT_BRANCH ?: 'default'}"
                 checkout scm
+                echo 'Repository cloned successfully.'
             }
         }
 
-        stage('Build') {
+        // ── Stage 2: Maven Build (compile only) ───────────────
+        stage('Maven Build') {
             steps {
-                echo 'Compiling application...'
-                sh '''
-                    echo "Build step: compile only"
-                    # mvn clean compile
-                    # ./gradlew classes
-                '''
+                echo 'Compiling all microservices...'
+                sh 'mvn clean compile'
+                echo 'Compile completed successfully.'
             }
         }
 
-        stage('Unit Tests') {
+        // ── Stage 3: Run Unit Tests ───────────────────────────
+        stage('Run Unit Tests') {
             when {
                 not { expression { params.SKIP_TESTS } }
             }
             steps {
                 echo 'Running unit tests...'
-                sh '''
-                    echo "Test step: unit tests"
-                    # mvn test
-                    # ./gradlew test
-                '''
+                sh 'mvn test'
             }
             post {
                 always {
-                    script {
-                        if (fileExists('target/surefire-reports/*.xml') || fileExists('build/test-results/**/*.xml')) {
-                            junit allowEmptyResults: true, testResults: '**/surefire-reports/*.xml, **/test-results/**/*.xml'
-                        }
-                    }
+                    // Publish JUnit test results from Surefire reports
+                    junit allowEmptyResults: true,
+                          testResults: '**/target/surefire-reports/*.xml'
+                    echo 'Test results published.'
                 }
             }
         }
 
+        // ── Stage 4: Package ──────────────────────────────────
         stage('Package') {
             steps {
-                echo 'Packaging artifact...'
-                sh '''
-                    echo "Package step: creating deployable artifact"
-                    # mvn package -DskipTests
-                    # ./gradlew assemble
-                '''
+                echo 'Packaging microservices into JAR files...'
+                sh 'mvn package -DskipTests'
+                echo 'Packaging completed successfully.'
             }
             post {
                 success {
-                    archiveArtifacts artifacts: '**/target/*.jar, **/build/libs/*.jar', allowEmptyArchive: true
+                    archiveArtifacts artifacts: '**/target/*.jar',
+                                     fingerprint: true,
+                                     allowEmptyArchive: false
+                    echo 'Artifacts archived.'
                 }
             }
         }
 
-        stage('Build Status') {
-            steps {
-                echo "Build #${BUILD_NUMBER} on branch ${GIT_BRANCH} — PASSED"
-            }
-        }
     }
 
+    // ── Post Actions ──────────────────────────────────────────
     post {
-        always {
-            cleanWs()
-        }
         success {
-            echo "Build-only pipeline SUCCESS — ${APP_NAME} #${BUILD_NUMBER}"
+            echo "BUILD SUCCESS — ${env.APP_NAME} #${env.BUILD_NUMBER} (${env.GIT_BRANCH ?: 'unknown branch'})"
         }
         failure {
-            echo "Build-only pipeline FAILED — ${APP_NAME} #${BUILD_NUMBER}. Check logs above."
+            echo "BUILD FAILED — ${env.APP_NAME} #${env.BUILD_NUMBER}. Check the logs above."
+        }
+        always {
+            echo 'Build pipeline finished.'
         }
     }
 }

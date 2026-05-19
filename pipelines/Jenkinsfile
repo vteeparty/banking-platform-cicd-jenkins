@@ -1,9 +1,8 @@
 // ============================================================
-// Banking Platform — Main CI/CD Pipeline
-// Jenkins Declarative Pipeline
+// Banking Platform — CI Pipeline
+// Jenkins Declarative Pipeline (Beginner-Friendly, Local)
+// Stages: Clone → Build → Test → Archive
 // ============================================================
-
-@Library('banking-shared-library') _
 
 pipeline {
 
@@ -11,197 +10,78 @@ pipeline {
 
     // ── Environment ──────────────────────────────────────────
     environment {
-        APP_NAME        = 'banking-platform'
-        DOCKER_REGISTRY = 'docker.io'
-        DOCKER_IMAGE    = "${DOCKER_REGISTRY}/${APP_NAME}"
-        SONAR_PROJECT   = 'banking-platform'
-        // Credential IDs configured in Jenkins → Credentials
-        DOCKER_CREDS    = credentials('docker-registry-creds')
-        SONAR_TOKEN     = credentials('sonarqube-token')
-    }
-
-    // ── Build Triggers ────────────────────────────────────────
-    triggers {
-        pollSCM('H/5 * * * *')   // poll every 5 minutes (replace with webhook in prod)
+        APP_NAME    = 'banking-platform'
+        MAVEN_OPTS  = '-Xmx512m'
     }
 
     // ── Pipeline Options ──────────────────────────────────────
     options {
         buildDiscarder(logRotator(numToKeepStr: '10'))
         timestamps()
-        timeout(time: 30, unit: 'MINUTES')
+        timeout(time: 20, unit: 'MINUTES')
         disableConcurrentBuilds()
-    }
-
-    // ── Parameters ────────────────────────────────────────────
-    parameters {
-        booleanParam(name: 'SKIP_TESTS',       defaultValue: false, description: 'Skip unit tests')
-        booleanParam(name: 'SKIP_SONAR',       defaultValue: false, description: 'Skip SonarQube analysis')
-        booleanParam(name: 'PUSH_IMAGE',       defaultValue: true,  description: 'Push Docker image to registry')
-        string(name: 'IMAGE_TAG', defaultValue: "${BUILD_NUMBER}", description: 'Docker image tag')
     }
 
     // ── Stages ────────────────────────────────────────────────
     stages {
 
-        stage('Checkout') {
+        // ── Stage 1: Clone Repository ────────────────────────
+        stage('Clone Repository') {
             steps {
-                echo "Checking out branch: ${GIT_BRANCH}"
+                echo "Cloning repository for branch: ${env.GIT_BRANCH ?: 'default'}"
                 checkout scm
-                script {
-                    env.GIT_COMMIT_SHORT = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
-                    env.BUILD_TAG_FULL   = "${params.IMAGE_TAG}-${env.GIT_COMMIT_SHORT}"
-                }
+                echo 'Repository cloned successfully.'
             }
         }
 
-        stage('Environment Info') {
+        // ── Stage 2: Maven Build ─────────────────────────────
+        stage('Maven Build') {
             steps {
-                script {
-                    utils.printBuildInfo()
-                }
+                echo 'Building all microservices with Maven...'
+                sh 'mvn clean package -DskipTests'
+                echo 'Maven build completed successfully.'
             }
         }
 
-        stage('Build') {
-            steps {
-                echo 'Building application...'
-                sh '''
-                    # Replace with your actual build tool (Maven / Gradle / npm)
-                    echo "Build step: compile and package"
-                    # mvn clean package -DskipTests
-                    # ./gradlew clean build -x test
-                '''
-            }
-        }
-
-        stage('Unit Tests') {
-            when {
-                not { expression { params.SKIP_TESTS } }
-            }
+        // ── Stage 3: Run Unit Tests ───────────────────────────
+        stage('Run Unit Tests') {
             steps {
                 echo 'Running unit tests...'
-                sh '''
-                    echo "Test step: running unit tests"
-                    # mvn test
-                    # ./gradlew test
-                '''
+                sh 'mvn test'
             }
             post {
                 always {
-                    // Publish JUnit results if reports exist
-                    script {
-                        if (fileExists('target/surefire-reports/*.xml') || fileExists('build/test-results/**/*.xml')) {
-                            junit allowEmptyResults: true, testResults: '**/surefire-reports/*.xml, **/test-results/**/*.xml'
-                        }
-                    }
+                    // Publish JUnit test results from Surefire reports
+                    junit allowEmptyResults: true,
+                          testResults: '**/target/surefire-reports/*.xml'
+                    echo 'Test results published.'
                 }
             }
         }
 
-        stage('Security Scan — Dependencies') {
+        // ── Stage 4: Archive Artifacts ────────────────────────
+        stage('Archive Artifacts') {
             steps {
-                echo 'Running OWASP Dependency Check...'
-                sh '''
-                    echo "Dependency check step"
-                    # dependency-check.sh --project banking-platform \
-                    #   --scan . \
-                    #   --format XML \
-                    #   --out dependency-check-report \
-                    #   --propertyfile security/dependency-check-config.xml
-                '''
+                echo 'Archiving JAR files...'
+                archiveArtifacts artifacts: '**/target/*.jar',
+                                 fingerprint: true,
+                                 allowEmptyArchive: false
+                echo 'Artifacts archived successfully.'
             }
         }
 
-        stage('Code Quality — SonarQube') {
-            when {
-                not { expression { params.SKIP_SONAR } }
-            }
-            steps {
-                withSonarQubeEnv('SonarQube-Local') {
-                    sh '''
-                        echo "SonarQube analysis step"
-                        # mvn sonar:sonar \
-                        #   -Dsonar.projectKey=${SONAR_PROJECT} \
-                        #   -Dsonar.projectName="Banking Platform" \
-                        #   -Dsonar.login=${SONAR_TOKEN}
-                    '''
-                }
-            }
-        }
-
-        stage('Quality Gate') {
-            when {
-                not { expression { params.SKIP_SONAR } }
-            }
-            steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
-                }
-            }
-        }
-
-        stage('Build Docker Image') {
-            steps {
-                script {
-                    echo "Building Docker image: ${DOCKER_IMAGE}:${env.BUILD_TAG_FULL}"
-                    docker.build("${DOCKER_IMAGE}:${env.BUILD_TAG_FULL}", '--no-cache .')
-                }
-            }
-        }
-
-        stage('Push Docker Image') {
-            when {
-                expression { params.PUSH_IMAGE }
-            }
-            steps {
-                script {
-                    docker.withRegistry("https://${DOCKER_REGISTRY}", 'docker-registry-creds') {
-                        def img = docker.image("${DOCKER_IMAGE}:${env.BUILD_TAG_FULL}")
-                        img.push()
-                        // Also tag as latest on main branch
-                        if (env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'main') {
-                            img.push('latest')
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Notify') {
-            steps {
-                script {
-                    commonPipeline.sendBuildNotification(
-                        status:      'SUCCESS',
-                        appName:     env.APP_NAME,
-                        buildNumber: env.BUILD_NUMBER,
-                        branch:      env.GIT_BRANCH,
-                        commit:      env.GIT_COMMIT_SHORT
-                    )
-                }
-            }
-        }
     }
 
     // ── Post Actions ──────────────────────────────────────────
     post {
-        always {
-            echo 'Cleaning workspace...'
-            cleanWs()
-        }
         success {
-            echo "Pipeline SUCCESS — ${APP_NAME} build #${BUILD_NUMBER}"
+            echo "BUILD SUCCESS — ${env.APP_NAME} #${env.BUILD_NUMBER}"
         }
         failure {
-            script {
-                commonPipeline.sendBuildNotification(
-                    status:      'FAILURE',
-                    appName:     env.APP_NAME,
-                    buildNumber: env.BUILD_NUMBER,
-                    branch:      env.GIT_BRANCH ?: 'unknown',
-                    commit:      env.GIT_COMMIT_SHORT ?: 'unknown'
-                )
-            }
+            echo "BUILD FAILED — ${env.APP_NAME} #${env.BUILD_NUMBER}. Check the logs above."
+        }
+        always {
+            echo 'Pipeline finished.'
         }
     }
 }
