@@ -1,7 +1,24 @@
 // ============================================================
 // Banking Platform — CI Pipeline
 // Jenkins Declarative Pipeline (Beginner-Friendly, Local)
-// Stages: Clone → Build → Test → Archive
+// Stages: Clone → Build → Test → SonarQube Scan → Archive
+//
+// PRE-REQUISITE — Start SonarQube in Docker (run once on your machine):
+//
+//   docker run -d \
+//     --name sonarqube \
+//     -p 9000:9000 \
+//     sonarqube:community
+//
+//   Then open http://localhost:9000 in your browser.
+//   Default credentials: admin / admin (you will be prompted to change them).
+//
+// JENKINS SETUP (one-time):
+//   1. Install "SonarQube Scanner" plugin in Jenkins.
+//   2. Go to Manage Jenkins → System → SonarQube Servers.
+//      Name: SonarQube-Local   URL: http://localhost:9000
+//   3. Go to Manage Jenkins → Tools → SonarQube Scanner installations.
+//      Name: SonarScanner   ✔ Install automatically
 // ============================================================
 
 pipeline {
@@ -12,6 +29,9 @@ pipeline {
     environment {
         APP_NAME    = 'banking-platform'
         MAVEN_OPTS  = '-Xmx512m'
+
+        // Name must match what you entered in Manage Jenkins → System → SonarQube Servers
+        SONAR_SERVER = 'SonarQube-Local'
     }
 
     // ── Pipeline Options ──────────────────────────────────────
@@ -59,7 +79,50 @@ pipeline {
             }
         }
 
-        // ── Stage 4: Archive Artifacts ────────────────────────
+        // ── Stage 4: SonarQube Code Analysis ─────────────────
+        //
+        // What this stage does:
+        //   • Runs the Maven SonarQube plugin against your source code.
+        //   • Sends results to the local SonarQube server (http://localhost:9000).
+        //   • Reports bugs, code smells, vulnerabilities, and test coverage.
+        //
+        // The full Maven command being executed is:
+        //   mvn sonar:sonar \
+        //     -Dsonar.projectKey=banking-platform \
+        //     -Dsonar.host.url=http://localhost:9000 \
+        //     -Dsonar.scm.disabled=true
+        //
+        // Additional scanner properties are read from:
+        //   security/sonarqube-config.properties
+        //
+        // After the pipeline runs, open http://localhost:9000 and look for
+        // the "banking-platform" project to see the full analysis report.
+        stage('SonarQube Analysis') {
+            steps {
+                // withSonarQubeEnv automatically injects SONAR_HOST_URL and
+                // SONAR_AUTH_TOKEN from the Jenkins server configuration,
+                // so you do not have to hard-code the URL in this file.
+                withSonarQubeEnv("${SONAR_SERVER}") {
+                    echo 'Starting SonarQube code analysis...'
+                    sh """
+                        mvn sonar:sonar \
+                          -Dsonar.projectKey=banking-platform \
+                          -Dsonar.projectName='Banking Platform CI/CD' \
+                          -Dsonar.projectVersion=1.0 \
+                          -Dsonar.sources=src/main \
+                          -Dsonar.tests=src/test \
+                          -Dsonar.java.binaries=target/classes \
+                          -Dsonar.java.test.binaries=target/test-classes \
+                          -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
+                          -Dsonar.exclusions='**/generated/**,**/target/**,**/*Config.java,**/*Configuration.java,**/db/migration/**' \
+                          -Dsonar.scm.disabled=true
+                    """
+                    echo 'SonarQube analysis completed. Check http://localhost:9000 for results.'
+                }
+            }
+        }
+
+        // ── Stage 5: Archive Artifacts ────────────────────────
         stage('Archive Artifacts') {
             steps {
                 echo 'Archiving JAR files...'
