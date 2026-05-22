@@ -2,6 +2,7 @@
 // Banking Platform — CI Pipeline
 // Jenkins Declarative Pipeline (Beginner-Friendly, Local)
 // Stages: Clone → Build → Test → SonarQube Scan → Archive
+//         → Docker Build → Trivy Security Scan
 //
 // PRE-REQUISITE — Start SonarQube in Docker (run once on your machine):
 //
@@ -12,6 +13,23 @@
 //
 //   Then open http://localhost:9000 in your browser.
 //   Default credentials: admin / admin (you will be prompted to change them).
+//
+// PRE-REQUISITE — Install Trivy on the Jenkins host machine (run once):
+//
+//   Option A – using the official install script (Linux/WSL):
+//     curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+//
+//   Option B – using apt (Ubuntu/Debian):
+//     sudo apt-get install wget apt-transport-https gnupg lsb-release -y
+//     wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+//     echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+//     sudo apt-get update && sudo apt-get install trivy -y
+//
+//   Verify installation:
+//     trivy --version
+//
+//   NOTE: Docker must also be installed and running on the Jenkins host so that
+//         Trivy can pull and inspect the local image layers.
 //
 // JENKINS SETUP (one-time):
 //   1. Install "SonarQube Scanner" plugin in Jenkins.
@@ -32,6 +50,11 @@ pipeline {
 
         // Name must match what you entered in Manage Jenkins → System → SonarQube Servers
         SONAR_SERVER = 'SonarQube-Local'
+
+        // Docker image name tagged with the Jenkins build number so every build
+        // produces a unique, traceable image (e.g. banking-platform:42).
+        // Change 'banking-platform' to match your actual Docker image name.
+        IMAGE_NAME   = "banking-platform:${BUILD_NUMBER}"
     }
 
     // ── Pipeline Options ──────────────────────────────────────
@@ -130,6 +153,103 @@ pipeline {
                                  fingerprint: true,
                                  allowEmptyArchive: false
                 echo 'Artifacts archived successfully.'
+            }
+        }
+
+        // ── Stage 6: Docker Build ─────────────────────────────
+        //
+        // What this stage does:
+        //   • Builds a Docker image from the Dockerfile in the project root.
+        //   • Tags the image with the Jenkins build number so you can trace
+        //     exactly which pipeline run produced each image.
+        //
+        // PRE-REQUISITE:
+        //   • A Dockerfile must exist in the root of your project.
+        //   • Docker must be installed and running on the Jenkins host.
+        //   • The Jenkins process user must have permission to run Docker
+        //     (add the user to the 'docker' group: sudo usermod -aG docker jenkins).
+        //
+        // After a successful build you can verify the image locally with:
+        //   docker images | grep banking-platform
+        stage('Docker Build') {
+            steps {
+                echo "Building Docker image: ${IMAGE_NAME}..."
+                // 'docker build' reads the Dockerfile in the workspace root (.).
+                // The -t flag assigns the image name and tag defined in IMAGE_NAME.
+                sh "docker build -t ${IMAGE_NAME} ."
+                echo "Docker image ${IMAGE_NAME} built successfully."
+            }
+        }
+
+        // ── Stage 7: Trivy Security Scan ──────────────────────
+        //
+        // What this stage does:
+        //   • Scans the Docker image built in the previous stage for known
+        //     OS-package and application-dependency vulnerabilities (CVEs).
+        //   • Step 1 — prints ALL vulnerabilities (LOW, MEDIUM, HIGH, CRITICAL)
+        //     to the Jenkins console as an informational summary.  This step
+        //     never fails the pipeline so you can see the full picture.
+        //   • Step 2 — re-runs the scan scoped to HIGH and CRITICAL only.
+        //     '--exit-code 1' tells Trivy to return a non-zero exit code when
+        //     any matching CVEs are found, which causes Jenkins to mark the
+        //     build as FAILED.  Fix the HIGH/CRITICAL issues before merging.
+        //
+        // Reading the output:
+        //   • Each row shows: Library | Vulnerability ID | Severity | Installed version | Fixed version
+        //   • Rows highlighted in red/bold are HIGH or CRITICAL.
+        //   • 'Fixed Version' tells you the minimum safe version to upgrade to.
+        //
+        // PRE-REQUISITE:
+        //   • Trivy must be installed on the Jenkins host machine.
+        //     See the install instructions at the top of this file.
+        stage('Trivy Security Scan') {
+            steps {
+                echo "Starting Trivy security scan on image: ${IMAGE_NAME}..."
+
+                // ── Step 1: Print all severities (informational) ──────────
+                // '--exit-code 0'  → never fail on this step; always print results
+                // '--severity'     → comma-separated list of severity levels to report
+                // '--no-progress'  → suppress the progress bar for cleaner Jenkins logs
+                // '--format table' → human-readable table output in the console
+                echo '--- Trivy full report (LOW, MEDIUM, HIGH, CRITICAL) ---'
+                sh """
+                    trivy image \\
+                        --exit-code 0 \\
+                        --severity LOW,MEDIUM,HIGH,CRITICAL \\
+                        --no-progress \\
+                        --format table \\
+                        ${IMAGE_NAME}
+                """
+
+                // ── Step 2: Fail pipeline on HIGH or CRITICAL only ────────
+                // '--exit-code 1'  → return exit code 1 (build failure) when
+                //                    vulnerabilities at the listed severities are found
+                // '--severity HIGH,CRITICAL' → only flag serious vulnerabilities
+                // This keeps the pipeline green for informational LOW/MEDIUM issues
+                // while enforcing a hard stop on serious security risks.
+                echo '--- Trivy strict check (HIGH and CRITICAL only) ---'
+                sh """
+                    trivy image \\
+                        --exit-code 1 \\
+                        --severity HIGH,CRITICAL \\
+                        --no-progress \\
+                        --format table \\
+                        ${IMAGE_NAME}
+                """
+
+                echo 'Trivy security scan completed. No HIGH or CRITICAL vulnerabilities found.'
+            }
+            post {
+                // This runs whether the stage passed or failed, giving you a
+                // clear message in the Jenkins console in both cases.
+                failure {
+                    echo """TRIVY SCAN FAILED — HIGH or CRITICAL vulnerabilities were detected in ${IMAGE_NAME}.
+Review the table above, upgrade the affected libraries to the 'Fixed Version' shown,
+rebuild the image, and re-run the pipeline."""
+                }
+                success {
+                    echo "Trivy scan passed — ${IMAGE_NAME} has no HIGH or CRITICAL vulnerabilities."
+                }
             }
         }
 
