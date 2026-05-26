@@ -1,0 +1,99 @@
+# ============================================================
+# OWASP ZAP Baseline Scan — Custom Alert Rules
+# ============================================================
+#
+# This file lets you tune how ZAP classifies individual passive-scan alerts
+# for the Banking Platform microservices.
+#
+# HOW TO USE
+# ----------
+# 1. Edit the action column for any alert ID you want to change.
+# 2. Add the -c flag to the docker run command in pipelines/Jenkinsfile:
+#
+#      docker run --rm \
+#          --add-host=host.docker.internal:host-gateway \
+#          -v "$(pwd)/zap-reports:/zap/wrk:rw" \
+#          -v "$(pwd)/security/zap-rules.tsv:/zap/wrk/zap-rules.tsv:ro" \
+#          ghcr.io/zaproxy/zaproxy:stable \
+#          zap-baseline.py \
+#              -t http://host.docker.internal:8081 \
+#              -r zap-report.html \
+#              -c zap-rules.tsv \
+#              -l WARN \
+#              -I
+#
+# FORMAT (tab-separated)
+# ----------------------
+#   <alertId>   <action>   # optional comment
+#
+# ACTIONS
+# -------
+#   IGNORE  — Suppress the alert entirely (use for confirmed false positives).
+#   WARN    — Log the alert in the report but do not affect the pipeline exit code.
+#   FAIL    — Cause zap-baseline.py to exit with code 2, marking the Jenkins
+#             build UNSTABLE.  Use this for findings you must fix before release.
+#
+# FINDING ALERT IDs
+# -----------------
+#   Run the scan once without this file, then look up numeric IDs in the
+#   generated HTML report or at https://www.zaproxy.org/docs/alerts/
+#
+# ============================================================
+
+# ── Section 1: IGNORE — Suppress informational / false-positive alerts ────────
+#
+# These alerts fire frequently on REST APIs and carry little practical risk
+# in a local development environment.  Suppressing them reduces noise so
+# the team can focus on genuine findings.
+
+10015	IGNORE	# Incomplete or No Cache-Control Header — common for JSON REST responses
+10027	IGNORE	# Information Disclosure: Suspicious Comments — dev-time TODO comments
+10049	IGNORE	# Non-Storable Content — expected for dynamic API responses
+10050	IGNORE	# Retrieved from Cache — informational, not a security issue
+10109	IGNORE	# Modern Web Application fingerprint — informational only
+10111	IGNORE	# Authentication Request Identified — informational
+10112	IGNORE	# Session Management Response Identified — informational
+10113	IGNORE	# Verification Request Identified — informational
+
+# ── Section 2: WARN — Review but do not block the build ───────────────────────
+#
+# These findings represent security hardening opportunities that should be
+# tracked and addressed before moving to production, but are acceptable
+# during local development and feature-branch testing.
+
+10010	WARN	# Cookie No HttpOnly Flag — set HttpOnly on all session cookies
+10011	WARN	# Cookie Without Secure Flag — acceptable on plain HTTP locally; fix for HTTPS
+10016	WARN	# Web Browser XSS Protection Not Enabled — add X-XSS-Protection header
+10017	WARN	# Cross-Domain JavaScript Source File Inclusion
+10019	WARN	# Content-Type Header Missing — always set Content-Type in responses
+10020	WARN	# X-Frame-Options Header Not Set — prevent clickjacking; add DENY or SAMEORIGIN
+10021	WARN	# X-Content-Type-Options Header Missing — add nosniff to all responses
+10035	WARN	# Strict-Transport-Security Not Set — expected on plain HTTP; required for HTTPS
+10036	WARN	# Server Version Leakage via Server Header — remove or obfuscate server banner
+10037	WARN	# X-Powered-By Header Leaks Technology — remove this header in production
+10038	WARN	# Content Security Policy (CSP) Header Not Set — add CSP for browser clients
+10054	WARN	# Cookie Without SameSite Attribute — set SameSite=Lax or Strict
+10063	WARN	# Permissions-Policy Header Not Set — restrict browser feature access
+10094	WARN	# Base64 Disclosure — ensure no sensitive data is base64-encoded in responses
+10096	WARN	# Timestamp Disclosure — review whether timestamps expose internal details
+10098	WARN	# Cross-Domain Misconfiguration — review CORS configuration
+10108	WARN	# Reverse Tabnabbing — use rel="noopener noreferrer" on external links
+
+# ── Section 3: FAIL — Serious findings that must be fixed before release ───────
+#
+# These alerts indicate meaningful security weaknesses in a banking API.
+# The pipeline will be marked UNSTABLE when any of these are detected.
+# Open the HTML report, apply the recommended fix, and re-run the pipeline.
+
+10023	FAIL	# Information Disclosure: Debug Error Messages — never expose stack traces
+10045	FAIL	# Source Code Disclosure via /WEB-INF — misconfigured servlet container
+10052	FAIL	# X-ChromeLogger-Data Header — server-side data leaking via response headers
+10056	FAIL	# X-Debug-Token Header — Spring/framework debug mode active in running app
+10062	FAIL	# PII Disclosure — personally identifiable information in HTTP responses
+10095	FAIL	# Backup File Disclosed — backup/temp files (.bak, ~, .swp) publicly accessible
+10105	FAIL	# Weak Authentication Method — basic auth over plain HTTP; use token-based auth
+10107	FAIL	# Httpoxy — Proxy header misuse leading to server-side request forgery
+
+# ============================================================
+# END OF RULES FILE
+# ============================================================

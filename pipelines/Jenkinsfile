@@ -2,7 +2,7 @@
 // Banking Platform — CI Pipeline
 // Jenkins Declarative Pipeline (Beginner-Friendly, Local)
 // Stages: Clone → Build → Test → SonarQube Scan → Archive
-//         → Docker Build → Trivy Security Scan
+//         → Docker Build → Trivy Security Scan → ZAP DAST Scan
 //
 // PRE-REQUISITE — Start SonarQube in Docker (run once on your machine):
 //
@@ -30,6 +30,25 @@
 //
 //   NOTE: Docker must also be installed and running on the Jenkins host so that
 //         Trivy can pull and inspect the local image layers.
+//
+// PRE-REQUISITE — OWASP ZAP DAST Scan (Stage 8 — no install needed):
+//   ZAP runs inside a Docker container that is pulled automatically.
+//   Your microservice must be running on port 8081 BEFORE Stage 8 executes.
+//   Start it using one of:
+//
+//     Option A — Maven dev server:
+//       mvn spring-boot:run -Dspring-boot.run.arguments="--server.port=8081"
+//
+//     Option B — run the packaged JAR:
+//       java -jar target/banking-platform.jar --server.port=8081
+//
+//     Option C — run the Docker image built in Stage 6:
+//       docker run -d -p 8081:8081 banking-platform:<build-number>
+//
+//   On Linux/WSL, map host.docker.internal if it is not present:
+//     echo "$(ip route show default | awk '{print $3}') host.docker.internal" \
+//       | sudo tee -a /etc/hosts
+//   (Docker Desktop on Windows and Mac handles this automatically.)
 //
 // JENKINS SETUP (one-time):
 //   1. Install "SonarQube Scanner" plugin in Jenkins.
@@ -61,7 +80,7 @@ pipeline {
     options {
         buildDiscarder(logRotator(numToKeepStr: '10'))
         timestamps()
-        timeout(time: 20, unit: 'MINUTES')
+        timeout(time: 30, unit: 'MINUTES')   // increased to accommodate ZAP DAST scan (~5–8 min)
         disableConcurrentBuilds()
     }
 
@@ -249,6 +268,144 @@ rebuild the image, and re-run the pipeline."""
                 }
                 success {
                     echo "Trivy scan passed — ${IMAGE_NAME} has no HIGH or CRITICAL vulnerabilities."
+                }
+            }
+        }
+
+        // ── Stage 8: OWASP ZAP DAST Scan ─────────────────────────────
+        //
+        // What this stage does:
+        //   • Performs Dynamic Application Security Testing (DAST) by sending
+        //     real HTTP requests to your *running* Spring Boot microservice —
+        //     the same way an attacker would probe it from the outside.
+        //   • Uses the official OWASP ZAP Docker image; no local ZAP install
+        //     needed on the Jenkins host.
+        //   • Runs zap-baseline.py — a passive-only scan that:
+        //       - Spiders the target URL to discover endpoints.
+        //       - Checks for common issues: missing security headers,
+        //         insecure cookie flags, information disclosure, etc.
+        //       - Does NOT send destructive or active attack payloads, so it
+        //         is safe to run against a development API.
+        //   • Saves a full annotated HTML report as a Jenkins build artifact.
+        //   • Marks the build UNSTABLE (not outright FAILED) when FAIL-level
+        //     alerts are found, so the team can review the report before
+        //     deciding whether to block the release.
+        //
+        // How to read the console output:
+        //   PASS  → check passed, no issue found
+        //   WARN  → informational finding (build stays GREEN)
+        //   FAIL  → serious finding    (build marked UNSTABLE)
+        //
+        // Customising alert thresholds (advanced):
+        //   Edit security/zap-rules.tsv to IGNORE, WARN, or FAIL on specific
+        //   alert IDs, then add '-c /zap/wrk/zap-rules.tsv' to the docker run
+        //   command below and mount the file into /zap/wrk/.
+        //   Reference: https://www.zaproxy.org/docs/docker/baseline-scan/
+        stage('OWASP ZAP DAST Scan') {
+            steps {
+                echo '============================================================'
+                echo 'OWASP ZAP — Dynamic Application Security Testing (DAST)'
+                echo 'Target : http://host.docker.internal:8081'
+                echo 'Mode   : Baseline scan (passive checks only — no active attack payloads)'
+                echo '============================================================'
+
+                // Create a workspace-local output directory.
+                // This folder is bind-mounted into the ZAP container so the
+                // HTML report lands directly in the Jenkins workspace.
+                sh 'mkdir -p zap-reports'
+
+                script {
+                    // ── Run OWASP ZAP Baseline Scan ──────────────────────────
+                    //
+                    // docker run --rm
+                    //   Spin up the container, run the scan, auto-remove on exit.
+                    //   No leftover containers clutter the Jenkins host.
+                    //
+                    // --add-host=host.docker.internal:host-gateway
+                    //   Resolves 'host.docker.internal' to the Docker host inside
+                    //   the container.  Required on Linux; Docker Desktop on
+                    //   Windows/Mac injects this entry automatically.
+                    //
+                    // -v "$(pwd)/zap-reports:/zap/wrk:rw"
+                    //   Bind-mount the local zap-reports/ directory to /zap/wrk
+                    //   inside the container.  ZAP writes the HTML report to
+                    //   /zap/wrk/zap-report.html, which appears in the workspace.
+                    //
+                    // ghcr.io/zaproxy/zaproxy:stable
+                    //   Official OWASP ZAP image from GitHub Container Registry.
+                    //   'stable' always resolves to the latest stable release.
+                    //
+                    // zap-baseline.py
+                    //   Built-in ZAP script.  Passive scan only — safe for any API.
+                    //
+                    // -t http://host.docker.internal:8081
+                    //   Target URL: the microservice running on the host machine.
+                    //   Change 8081 to the port your service listens on.
+                    //
+                    // -r zap-report.html
+                    //   HTML output file written to /zap/wrk/ (→ zap-reports/).
+                    //
+                    // -l WARN
+                    //   Log level: include PASS, WARN, and FAIL in console output
+                    //   so you see the full picture at a glance.
+                    //
+                    // -I
+                    //   Ignore-warn flag: exit with code 0 even if WARN-level
+                    //   alerts are raised.  Only FAIL-level alerts produce
+                    //   a non-zero exit code (code 2), which we handle below.
+                    def zapExitCode = sh(
+                        script: """
+                            docker run --rm \\
+                                --add-host=host.docker.internal:host-gateway \\
+                                -v "\$(pwd)/zap-reports:/zap/wrk:rw" \\
+                                ghcr.io/zaproxy/zaproxy:stable \\
+                                zap-baseline.py \\
+                                    -t http://host.docker.internal:8081 \\
+                                    -r zap-report.html \\
+                                    -l WARN \\
+                                    -I
+                        """,
+                        returnStatus: true
+                    )
+
+                    echo '============================================================'
+                    echo "ZAP scan complete. Exit code: ${zapExitCode}"
+                    echo '  0 → No FAIL-level alerts  (build stays GREEN)'
+                    echo '  1 → WARN-level alerts only (suppressed by -I; build GREEN)'
+                    echo '  2 → FAIL-level alerts found (build marked UNSTABLE)'
+                    echo '============================================================'
+
+                    // Exit code 2 = at least one FAIL-level alert was found.
+                    // Mark UNSTABLE rather than FAILED so the team can still
+                    // download and review the HTML report before deciding
+                    // whether to block the release.
+                    if (zapExitCode == 2) {
+                        echo ''
+                        echo '*** ZAP DAST SCAN — FAIL-level security alerts detected! ***'
+                        echo 'Recommended actions:'
+                        echo '  1. Click "Build Artifacts" in Jenkins.'
+                        echo '  2. Open zap-reports/zap-report.html in your browser.'
+                        echo '  3. Review each FAIL-level alert and apply the fix.'
+                        echo '  4. Re-run the pipeline to confirm the issue is resolved.'
+                        echo '  5. To suppress a false positive, add the alert ID to'
+                        echo '     security/zap-rules.tsv with action IGNORE or WARN.'
+                        echo ''
+                        currentBuild.result = 'UNSTABLE'
+                    } else {
+                        echo 'ZAP DAST scan passed — no FAIL-level security alerts detected.'
+                    }
+                }
+            }
+            post {
+                always {
+                    // Archive the ZAP HTML report regardless of pass/fail so it
+                    // is always accessible from the Jenkins build page under
+                    // Build Artifacts → zap-reports/zap-report.html.
+                    archiveArtifacts artifacts: 'zap-reports/zap-report.html',
+                                     allowEmptyArchive: true,
+                                     fingerprint: true
+                    echo 'ZAP HTML report archived as build artifact.'
+                    echo 'View: Jenkins Build → Build Artifacts → zap-reports/zap-report.html'
                 }
             }
         }
