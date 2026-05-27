@@ -1,0 +1,129 @@
+# ============================================================
+# Docker Compose — Prometheus & Grafana for Banking Platform
+# ============================================================
+#
+# QUICK START
+# -----------
+# 1. Navigate to the monitoring/ directory:
+#    cd monitoring
+#
+# 2. Start Prometheus and Grafana:
+#    docker-compose up -d
+#
+# 3. Open your browser:
+#    • Prometheus: http://localhost:9090
+#    • Grafana:    http://localhost:3000 (admin/admin)
+#
+# 4. Stop the stack:
+#    docker-compose down
+#
+# ============================================================
+
+version: '3.8'
+
+services:
+
+  # ── Prometheus Service ──────────────────────────────────────
+  prometheus:
+    # Official Prometheus image.
+    image: prom/prometheus:latest
+
+    container_name: prometheus
+
+    # Expose Prometheus UI on port 9090.
+    ports:
+      - "9090:9090"
+
+    # Mount the local prometheus.yml into the container.
+    # This way, Prometheus reads our service configurations.
+    volumes:
+      # Read-only mount of prometheus.yml from the monitoring/ directory
+      # into the container's /etc/prometheus/ directory.
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+      # Persistent storage: Keep Prometheus data even if the container restarts.
+      # Created in ./prometheus-data/ on the host.
+      - prometheus-data:/prometheus
+
+    # Start Prometheus with the configuration file.
+    # --config.file=/etc/prometheus/prometheus.yml
+    #   Tells Prometheus where to find the config.
+    # --storage.tsdb.path=/prometheus
+    #   Where to store the time-series database.
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+
+    # Restart policy: always restart unless manually stopped.
+    restart: unless-stopped
+
+    # Resource limits (optional, comment out if not needed).
+    # Prevents Prometheus from consuming too much memory on a dev machine.
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # ── Grafana Service ────────────────────────────────────────
+  grafana:
+    # Official Grafana image.
+    image: grafana/grafana:latest
+
+    container_name: grafana
+
+    # Expose Grafana UI on port 3000.
+    ports:
+      - "3000:3000"
+
+    # Environment variables for Grafana configuration.
+    environment:
+      # Enable admin login by default.
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+
+      # Allow users to sign up new accounts (set to false in production).
+      GF_USERS_ALLOW_SIGN_UP: "true"
+
+      # Default theme for dashboards.
+      GF_THEME: dark
+
+    # Persistent storage for Grafana data (dashboards, datasources, etc.).
+    # Also mount provisioning files for auto-configuration.
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+
+    # Restart policy: always restart unless manually stopped.
+    restart: unless-stopped
+
+    # Depends on Prometheus (Grafana will wait for Prometheus to start).
+    depends_on:
+      - prometheus
+
+    # Resource limits (optional, comment out if not needed).
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+# ── Named Volumes ───────────────────────────────────────────
+# These volumes persist data even if containers are stopped/removed.
+volumes:
+  prometheus-data:
+    driver: local
+  grafana-storage:
+    driver: local
+
+# ── Network ─────────────────────────────────────────────────
+# By default, Docker Compose creates a network and both services
+# can reach each other by service name (e.g., prometheus:9090).
+# This is how Grafana auto-discovers Prometheus as a data source.
+networks:
+  default:
+    name: banking-monitoring
+    driver: bridge

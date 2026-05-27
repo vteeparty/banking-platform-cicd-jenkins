@@ -1,0 +1,23 @@
+# ============================================================
+# Grafana Provisioning — Dashboard Configuration
+# ============================================================
+#
+# This file tells Grafana where to find pre-built dashboards
+# that auto-load when Grafana starts.
+#
+# Location: monitoring/provisioning/dashboards/dashboards.yml
+#
+# ============================================================
+
+apiVersion: 1
+
+providers:
+  # Load dashboards from the dashboards directory
+  - name: 'Provided Dashboards'
+    orgId: 1
+    folder: 'Banking Platform'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    options:
+      path: /etc/grafana/provisioning/dashboards

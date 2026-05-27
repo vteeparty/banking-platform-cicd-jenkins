@@ -1,0 +1,83 @@
+# ============================================================
+# Example: Spring Boot Actuator Configuration
+# ============================================================
+#
+# Add this to your microservice's application.yml
+# to enable metrics exposure via the Prometheus endpoint.
+#
+# File path: src/main/resources/application.yml
+# ============================================================
+
+spring:
+  application:
+    name: payment-service  # or transaction-service, notification-service
+
+server:
+  port: 8080  # Change to 8081 or 8082 for other services
+
+# ── Spring Boot Actuator Configuration ──────────────────────
+management:
+  # Enable web endpoints (HTTP REST interface).
+  endpoints:
+    web:
+      # Expose only the specified endpoints for security.
+      # - prometheus: Metrics in Prometheus format (required for monitoring)
+      # - health: Application health status
+      # - info: Application information
+      exposure:
+        include: prometheus,health,info
+
+  # Endpoint-specific configuration.
+  endpoint:
+    # Health endpoint shows detailed status.
+    health:
+      show-details: always
+
+  # Metrics configuration.
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+
+    # Optional: Include or exclude specific metrics.
+    # Example: exclude JVM metrics to reduce scrape size.
+    # enable:
+    #   jvm: false
+    #   process: true
+    #   logback: true
+
+    # Optional: Tag all metrics with application and environment info.
+    tags:
+      application: banking-platform
+      environment: local
+      version: "1.0.0"
+
+# ── Logging Configuration (optional) ────────────────────────
+logging:
+  level:
+    root: INFO
+    org.springframework.web: DEBUG  # Log HTTP requests
+    io.micrometer.prometheus: DEBUG # Log Prometheus scrapes
+
+# ============================================================
+# NOTES FOR BEGINNERS
+# ============================================================
+#
+# 1. Replace payment-service with your actual microservice name.
+#
+# 2. Each microservice should have a different port:
+#    - payment-service:    8080
+#    - transaction-service: 8081
+#    - notification-service: 8082
+#
+# 3. After adding this config, restart the application.
+#
+# 4. Verify the endpoint works:
+#    curl http://localhost:8080/actuator/prometheus
+#
+# 5. The endpoint should return metrics in Prometheus format:
+#    # HELP jvm_memory_used_bytes Used memory of a memory pool
+#    # TYPE jvm_memory_used_bytes gauge
+#    jvm_memory_used_bytes{...} 123456789
+#
+# ============================================================

@@ -1,0 +1,110 @@
+# ============================================================
+# Prometheus Configuration — Banking Platform Microservices
+# ============================================================
+#
+# This file defines which services Prometheus will scrape for
+# metrics. Each microservice exposes metrics via the Spring Boot
+# Actuator endpoint: /actuator/prometheus
+#
+# Prometheus Server:
+#   • Port: 9090 (http://localhost:9090)
+#   • Data Retention: 15d (2 weeks)
+#
+# ============================================================
+
+global:
+  # How often Prometheus scrapes metrics from each target.
+  # Shorter intervals = more detailed graphs but higher storage usage.
+  scrape_interval: 15s
+
+  # How long to wait for a target to respond before timing out.
+  scrape_timeout: 10s
+
+  # How often to evaluate alerting rules (if any).
+  evaluation_interval: 15s
+
+# ── Scrape Configurations ────────────────────────────────────
+# Each job defines a set of targets and how to scrape them.
+scrape_configs:
+
+  # ── Prometheus Self-Monitoring ─────────────────────────────
+  # Prometheus exports its own internal metrics, which is useful
+  # for debugging Prometheus itself.
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    metrics_path: '/metrics'
+
+  # ── Payment Service ────────────────────────────────────────
+  # Scrapes Spring Boot Actuator metrics from the payment microservice.
+  #
+  # Prerequisites:
+  #   1. Spring Boot app has spring-boot-starter-actuator in pom.xml.
+  #   2. application.yaml has:
+  #      management:
+  #        endpoints:
+  #          web:
+  #            exposure:
+  #              include: prometheus
+  #        metrics:
+  #          export:
+  #            prometheus:
+  #              enabled: true
+  #   3. Service is running and reachable at payment-service:8080.
+  #
+  # Docker Compose Users:
+  #   The service name 'payment-service' is resolved by the Docker
+  #   network automatically; no changes needed.
+  #
+  # Localhost Users (running services on host machine):
+  #   Replace 'payment-service:8080' with 'localhost:8080'
+  #   (or change the port if your service uses a different one).
+  - job_name: 'payment-service'
+    static_configs:
+      - targets: ['payment-service:8080']
+    metrics_path: '/actuator/prometheus'
+    # Scrape every 30 seconds for faster metric updates.
+    scrape_interval: 30s
+    # Optional: Add job labels for better identification in dashboards.
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - source_labels: [__scheme__]
+        target_label: scheme
+
+  # ── Transaction Service ────────────────────────────────────
+  # Scrapes Spring Boot Actuator metrics from the transaction microservice.
+  #
+  # Prerequisites: Same as Payment Service (see above).
+  - job_name: 'transaction-service'
+    static_configs:
+      - targets: ['transaction-service:8081']
+    metrics_path: '/actuator/prometheus'
+    scrape_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - source_labels: [__scheme__]
+        target_label: scheme
+
+  # ── Notification Service ───────────────────────────────────
+  # Scrapes Spring Boot Actuator metrics from the notification microservice.
+  #
+  # Prerequisites: Same as Payment Service (see above).
+  - job_name: 'notification-service'
+    static_configs:
+      - targets: ['notification-service:8082']
+    metrics_path: '/actuator/prometheus'
+    scrape_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - source_labels: [__scheme__]
+        target_label: scheme
+
+# ── Alerting Rules (Optional) ────────────────────────────────
+# Uncomment and customize if you want to define alerting rules
+# that trigger notifications (e.g., when CPU usage is too high).
+#
+# rule_files:
+#   - /etc/prometheus/alert-rules.yml

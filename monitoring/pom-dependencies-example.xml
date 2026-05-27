@@ -1,0 +1,75 @@
+# ============================================================
+# Example: pom.xml Dependencies for Monitoring
+# ============================================================
+#
+# Add these dependencies to your Spring Boot microservice's pom.xml
+# to enable metrics collection and Prometheus exposition.
+#
+# Location in pom.xml: <dependencies> section
+# ============================================================
+
+<!-- Spring Boot Actuator: Exposes operational endpoints (health, metrics, etc.) -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-actuator</artifactId>
+    <!-- Version inherited from spring-boot-starter-parent -->
+</dependency>
+
+<!-- Micrometer Prometheus Registry: Formats metrics for Prometheus -->
+<!-- Micrometer is the metrics library included in Actuator by default -->
+<dependency>
+    <groupId>io.micrometer</groupId>
+    <artifactId>micrometer-registry-prometheus</artifactId>
+    <!-- Version inherited from spring-boot-starter-parent -->
+</dependency>
+
+<!-- 
+  OPTIONAL: Add custom metrics support (if you want to track business logic)
+  
+  <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-core</artifactId>
+  </dependency>
+  
+  Then in your code:
+  
+  @Component
+  public class PaymentMetrics {
+    private final MeterRegistry meterRegistry;
+    
+    public PaymentMetrics(MeterRegistry meterRegistry) {
+      this.meterRegistry = meterRegistry;
+      Counter.builder("banking.payments.processed")
+        .description("Total payments processed")
+        .register(meterRegistry);
+    }
+  }
+-->
+
+<!-- ========================================================
+  VERSION COMPATIBILITY
+  ========================================================
+  
+  Spring Boot Version → Compatible Versions
+  
+  3.1.x (LTS)
+    • spring-boot-starter-actuator: 3.1.x
+    • micrometer-registry-prometheus: 1.11.x
+  
+  3.0.x
+    • spring-boot-starter-actuator: 3.0.x
+    • micrometer-registry-prometheus: 1.10.x
+  
+  2.7.x (LTS)
+    • spring-boot-starter-actuator: 2.7.x
+    • micrometer-registry-prometheus: 1.9.x
+  
+  NOTE: Version is inherited from <parent> tag:
+  
+  <parent>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-parent</artifactId>
+      <version>3.1.5</version>
+  </parent>
+  
+  ======================================================== -->

@@ -1,0 +1,38 @@
+# ============================================================
+# Grafana Provisioning — Data Sources Configuration
+# ============================================================
+#
+# This file auto-configures Prometheus as a data source when
+# Grafana starts, so you don't need to set it up manually.
+#
+# Location: monitoring/provisioning/datasources/prometheus.yml
+#
+# ============================================================
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    
+    # URL used by Grafana to connect to Prometheus
+    # Inside Docker network: http://prometheus:9090
+    url: http://prometheus:9090
+    
+    # Enable this data source by default
+    isDefault: true
+    
+    # HTTP settings
+    httpMethod: POST
+    
+    # JSON data with Prometheus-specific settings
+    jsonData:
+      # Timeout for Prometheus requests (seconds)
+      timeout: 30
+      
+      # Keep cookies (optional)
+      keepCookies: []
+    
+    # Mark as ready to use
+    editable: true
